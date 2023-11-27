@@ -1,0 +1,213 @@
+<html>
+	<head>
+		<meta charset="utf8">
+		<title>Cálculo Infinitesimal</title>
+
+		<script src="mathbox-bundle.js"></script>
+		<script src="dat.gui.js"></script>
+		<script src="parser.js"></script>
+		<link rel="stylesheet" href="mathbox.css">
+
+		<meta name="viewport" content="initial-scale=1, maximum-scale=1">
+	</head>
+	<body>
+		<script>
+			/* Load mathbox with controls */
+			const mathbox = MathBox.mathBox({
+				plugins: ['core', 'cursor', 'controls'],
+				controls: {
+					klass: THREE.OrbitControls
+				},
+			});
+			if (mathbox.fallback) throw 'WebGl Error';
+
+			/* Set renderer background */
+			mathbox.three.renderer.setClearColor(new THREE.Color(0xffffffff), 1.0);
+
+			/* Place camera */
+			//mathbox.set({ scale: 720, focus: 3 });
+			mathbox.camera({ proxy: true, position: [0, 0, 2] });
+
+			/* Create cartesian view */
+			const view = mathbox.cartesian({
+				range: [ [-10, 10], [-10, 10], [-10, 10]],
+				scale: [1, 1, 1/10],
+			});
+
+			/* Add 2d axis and grid */
+			view.axis({ axis: 1, width: 8 });
+			view.axis({ axis: 2, width: 8 });
+			view.grid({ width: 2, divideX: 20, divideY: 10, opacity: 0.25 });
+
+			const graph_data = view.interval({
+				expr: (emit, x, i, t) => { emit(x, x*x )},
+				width: 256,
+				channels: 2
+			});
+			const graph_data_view = view.line({ width: 4, color: 'blue' });
+			const first_cuadrant = view.interval({
+				expr: (emit, x, i, t) => { emit(x, -x+3) },
+				range: [0, 1],
+				width: 256,
+				channels: 2
+			});
+			const first_cuadrant_view = view.line({ width: 6, color: 'red', visible: false });
+			const volume = view.area({
+				expr: (emit, x, y, i, j, t) => { emit(x, y, 0) },
+				width: 32,
+				height: 32,
+				rangeY: [0, 2*Math.PI],
+				rangeX: [0, 1],
+				axes: [1, 2],
+				width: 256,
+				channels: 3,
+			});
+			const volume_view = view.surface({
+				points: volume,
+				fill: true,
+				opacity: 0.5,
+				color: 'red',
+				visible: false
+			});
+
+			var function_text = 'a*x*x+b';
+			var a = -1, b = 5;
+
+			var dx = 0.5;
+			var count = 0;
+
+			var x_min = -10, x_max = 10, y_min = -10, y_max = 10;
+			var graph_data_visible = true;
+			var first_cuadrant_visible = false;
+			var volume_visible = false;
+
+			const roscas_data = [];
+			const roscas = [];
+			const domain = mathbox.cartesian({ range: [[0, 2*Math.PI], [0, 1]] });
+
+			function add_rosca() {
+				const resolution = 16;
+				const data = domain.area({
+					expr: (emit, u, v, i, j, t) => {
+						emit(v*Math.cos(u), 0, v*Math.sin(u));
+						emit(v*Math.cos(u), 1, v*Math.sin(u));
+						emit(Math.cos(u), v, Math.sin(u));
+					},
+					width: resolution,
+					height: resolution,
+					axes: [1, 2],
+					channels: 3,
+					items: 3,
+				});
+				roscas_data.push(data);
+				const surface = view.surface({
+					points: data,
+					fill: true,
+					shaded: false,
+					lineX : false,
+					lineY: false,
+					color: '#8080ff',
+					visible: false,
+				});
+				roscas.push(surface);
+				const line = view.surface({
+					points: data,
+					fill: false,
+					lineX: true,
+					lineY: true,
+					color: 'black',
+					visible: false,
+				});
+				roscas.push(line);
+			}
+
+			for (let i = 0; i < 10; i++) {
+				add_rosca();
+			}
+			console.log(roscas);
+
+			function bisect(f, a, b) {
+				let fa = f(a), fb = f(b);
+				let i = 0;
+				while (b - a > 0.01) {
+					const t = (b+a)/2;
+					const ft = f(t);
+					if (ft < 0) {
+						fb = ft;
+						b = t;
+					} else if (ft > 0) {
+						fa = ft;
+						a = t;
+					} else {
+						return ft;
+					}
+					if (i > 10000) break;
+					i++;
+				}
+				return b;
+			}
+
+			function updategraph() {
+				const y_func = Parser.parse(function_text).toJSFunction(['x']);
+
+				const xm = bisect(y_func, 0, x_max);
+				graph_data.set('expr', (emit, x, i, t) => { emit(x, y_func(x)) });
+				first_cuadrant.set('expr', (emit, x, i, t) => { emit(x, y_func(x)) });
+				first_cuadrant.set('range', [0, xm]);
+
+				view.set('range', [ [x_min, x_max], [y_min, y_max] ]);
+
+				volume.set('rangeX', [0, xm]);
+				volume.set('expr', (emit, x, y, i, j, t) => { emit(x*Math.cos(y), y_func(x), x*Math.sin(y)) });
+
+				for (let i = 0; i < roscas_data.length; i++) {
+					const r = bisect((x) => y_func(x) - dx*i, 0, x_max);
+					roscas_data[i].set('expr', (emit, u, v) => {
+						emit(r*v*Math.cos(u), dx*i, r*v*Math.sin(u));
+						emit(r*v*Math.cos(u), dx*(i+1), r*v*Math.sin(u));
+						emit(r*Math.cos(u), dx*(v+i), r*Math.sin(u));
+					});
+				}
+
+			}
+			const gui = new dat.GUI();
+
+			gui.add(this, 'function_text').name('y = ').onChange( updategraph );
+
+			const folder_vis = gui.addFolder('Visibility');
+			folder_vis.add(this, 'graph_data_visible').name('View graph ').onChange(() => {
+				graph_data_view.set('visible', graph_data_visible);
+			});
+			folder_vis.add(this, 'first_cuadrant_visible').name('View first quadrant ').onChange(() => {
+				first_cuadrant_view.set('visible', first_cuadrant_visible);
+			});
+			folder_vis.add(this, 'volume_visible').name('View volume ').onChange(() => {
+				volume_view.set('visible', volume_visible);
+			});
+			folder_vis.add(this, 'count').min(0).max(10).step(1).onChange(() => {
+				roscas.forEach((r, i) => r.set('visible', 2*count > i));
+			});
+			folder_vis.open();
+
+			//const folder_3d = gui.addFolder('Volume controls');
+			//folder_3d.add(this, 'dx').min(0.01).max(1).onChange( updategraph );
+			//const count_gui = folder_3d.add(this, 'count').min(1).max(10);
+			//count_gui.onChange( updategraph );
+
+			const folder_par = gui.addFolder('Parameters');
+			folder_par.add(this, 'a').name('a = ').onChange( updategraph );
+			folder_par.add(this, 'b').name('b = ').onChange( updategraph );
+			//folder_par.open();
+
+			const folder_win = gui.addFolder('Window Range');
+			folder_win.add(this, 'x_min').onChange( updategraph );
+			folder_win.add(this, 'x_max').onChange( updategraph );
+			folder_win.add(this, 'y_min').onChange( updategraph );
+			folder_win.add(this, 'y_max').onChange( updategraph );
+
+			gui.open();
+
+			updategraph();
+		</script>
+	</body>
+</html>
