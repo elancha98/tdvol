@@ -31,7 +31,7 @@
 			/* Create cartesian view */
 			const view = mathbox.cartesian({
 				range: [ [-10, 10], [-10, 10], [-10, 10]],
-				scale: [1, 1, 1],
+				scale: [1, 1, 1/10],
 			});
 
 			/* Add 2d axis and grid */
@@ -45,18 +45,6 @@
 				channels: 2
 			});
 			const graph_data_view = view.line({ width: 4, color: 'blue' });
-			const min_data = view.interval({
-				expr: (emit, x, i, t) => { emit(x, x) },
-				width: 2,
-				channels: 2,
-			});
-			const min_data_view = view.line({ width: 4, color: 'red', visible: false});
-			const max_data = view.interval({
-				expr: (emit, x, i, t) => { emit(x, x) },
-				width: 2,
-				channels: 2,
-			});
-			const max_data_view = view.line({ width: 4, color: 'red', visible: false});
 			const first_cuadrant = view.interval({
 				expr: (emit, x, i, t) => { emit(x, -x+3) },
 				range: [0, 1],
@@ -65,14 +53,14 @@
 			});
 			const first_cuadrant_view = view.line({ width: 6, color: 'red', visible: false });
 			const volume = view.area({
+				expr: (emit, x, y, i, j, t) => { emit(x, y, 0) },
 				width: 32,
 				height: 32,
 				rangeY: [0, 2*Math.PI],
 				rangeX: [0, 1],
 				axes: [1, 2],
-				width: 32,
+				width: 256,
 				channels: 3,
-				items: 3
 			});
 			const volume_view = view.surface({
 				points: volume,
@@ -81,21 +69,14 @@
 				color: 'red',
 				visible: false
 			});
-			const volume_line = view.surface({
-				points: volume,
-				fill: false,
-				lineX: true,
-				lineY: true,
-				color: 'black',
-				visible: false
-			});
 
 			var function_text = 'a*x*x+b';
-			var a = -0.2, b = 5;
+			var a = -1, b = 5;
 
+			var dx = 0.5;
 			var count = 0;
 
-			var x_min = 1, x_max = 3;
+			var x_min = -10, x_max = 10, y_min = -10, y_max = 10;
 			var graph_data_visible = true;
 			var first_cuadrant_visible = false;
 			var volume_visible = false;
@@ -169,30 +150,22 @@
 			function updategraph() {
 				const y_func = Parser.parse(function_text).toJSFunction(['x']);
 
+				const xm = bisect(y_func, 0, x_max);
 				graph_data.set('expr', (emit, x, i, t) => { emit(x, y_func(x)) });
 				first_cuadrant.set('expr', (emit, x, i, t) => { emit(x, y_func(x)) });
-				first_cuadrant.set('range', [x_min, x_max]);
+				first_cuadrant.set('range', [0, xm]);
 
-				min_data.set('range', [0, y_func(x_min)]);
-				min_data.set('expr', (emit, x, i, t) => { emit(x_min, x) });
-				max_data.set('range', [0, y_func(x_max)]);
-				max_data.set('expr', (emit, x, i, t) => { emit(x_max, x) });
+				view.set('range', [ [x_min, x_max], [y_min, y_max] ]);
 
+				volume.set('rangeX', [0, xm]);
+				volume.set('expr', (emit, x, y, i, j, t) => { emit(x*Math.cos(y), y_func(x), x*Math.sin(y)) });
 
-				volume.set('expr', (emit, u, v, i, j, t) => {
-					const x = (1-u)*x_min + u*x_max;
-					emit(x, y_func(x)*Math.cos(v), y_func(x)*Math.sin(v))
-					emit(x_min, y_func(x_min)*u*Math.cos(v), y_func(x_min)*u*Math.sin(v))
-					emit(x_max, y_func(x_max)*u*Math.cos(v), y_func(x_max)*u*Math.sin(v))
-				});
-
-				const dx = (x_max - x_min)/10;
 				for (let i = 0; i < roscas_data.length; i++) {
-					const r = y_func(x_min+dx*i);
+					const r = bisect((x) => y_func(x) - dx*i, 0, x_max);
 					roscas_data[i].set('expr', (emit, u, v) => {
-						emit(x_min+dx*i,     r*v*Math.cos(u), r*v*Math.sin(u));
-						emit(x_min+dx*(i+1), r*v*Math.cos(u), r*v*Math.sin(u));
-						emit(x_min+dx*(i+v), r*Math.cos(u),   r*Math.sin(u));
+						emit(r*v*Math.cos(u), dx*i, r*v*Math.sin(u));
+						emit(r*v*Math.cos(u), dx*(i+1), r*v*Math.sin(u));
+						emit(r*Math.cos(u), dx*(v+i), r*Math.sin(u));
 					});
 				}
 
@@ -207,12 +180,9 @@
 			});
 			folder_vis.add(this, 'first_cuadrant_visible').name('View first quadrant ').onChange(() => {
 				first_cuadrant_view.set('visible', first_cuadrant_visible);
-				min_data_view.set('visible', first_cuadrant_visible);
-				max_data_view.set('visible', first_cuadrant_visible);
 			});
 			folder_vis.add(this, 'volume_visible').name('View volume ').onChange(() => {
 				volume_view.set('visible', volume_visible);
-				volume_line.set('visible', volume_visible);
 			});
 			folder_vis.add(this, 'count').min(0).max(10).step(1).onChange(() => {
 				roscas.forEach((r, i) => r.set('visible', 2*count > i));
@@ -229,8 +199,11 @@
 			folder_par.add(this, 'b').name('b = ').onChange( updategraph );
 			//folder_par.open();
 
-			folder_par.add(this, 'x_min').min(0).max(10).onChange( updategraph );
-			folder_par.add(this, 'x_max').min(0).max(10).onChange( updategraph );
+			const folder_win = gui.addFolder('Window Range');
+			folder_win.add(this, 'x_min').onChange( updategraph );
+			folder_win.add(this, 'x_max').onChange( updategraph );
+			folder_win.add(this, 'y_min').onChange( updategraph );
+			folder_win.add(this, 'y_max').onChange( updategraph );
 
 			gui.open();
 
